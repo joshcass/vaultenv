@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -10,32 +11,41 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	vault "github.com/hashicorp/vault/api"
 )
 
+var vaultClient = getVaultClient()
+
 func main() {
-	secretPath := os.Args[1]
-	data, err := fetchEnvironment(secretPath)
+	pathArg := os.Args[1]
+	mount, secretPath, _ := strings.Cut(pathArg, "/")
+	secretVersion, err := fetchVersion(mount, secretPath)
 	if err != nil {
-		log.Fatalf("failed to fetch secret: %v", err)
+		log.Fatalf("failed to fetch secret metadata: %v", err)
 	}
-	fileName := hashFilename(secretPath)
+	fileName := fmt.Sprintf("%d__-__%s", secretVersion, hashFilename(secretPath))
 	filePath, err := filePath()
 	if err != nil {
-		log.Fatalf("failed to create file path: %v", err)
+		log.Fatalf("failed to create memory path: %v", err)
 	}
-	// check for file before vaulting
-
-	err = writeFile(data, fileName)
-	if err != nil {
-		log.Fatalf("failed to write to memory: %v", err)
+	_, err = os.Stat(fmt.Sprintf("%s/%s", filePath, fileName))
+	if os.IsNotExist(err) {
+		data, err := fetchEnvironment(mount, secretPath)
+		if err != nil {
+			log.Fatalf("failed to fetch secret: %v", err)
+		}
+		err = writeFile(data, filePath, fileName)
+		if err != nil {
+			log.Fatalf("failed to write to memory: %v", err)
+		}
 	}
 	fmt.Printf("%s/%s", filePath, fileName)
 }
 
-func writeFile(data map[string]interface{}, fileName string) error {
-	file, err := os.Create(fmt.Sprintf("/dev/shm/%s", fileName))
+func writeFile(data map[string]interface{}, filePath, fileName string) error {
+	file, err := os.Create(fmt.Sprintf("%s/%s", filePath, fileName))
 	if err != nil {
 		return fmt.Errorf("unable to create file: %w", err)
 	}
@@ -47,33 +57,20 @@ func writeFile(data map[string]interface{}, fileName string) error {
 	return err
 }
 
-func fetchEnvironment(path string) (map[string]interface{}, error) {
-	vaultClient, err := vault.NewClient(vault.DefaultConfig())
+func fetchVersion(mount, path string) (int, error) {
+	data, err := vaultClient.KVv2(mount).GetMetadata(context.Background(), path)
 	if err != nil {
-		return nil, fmt.Errorf("unable to initialize Vault client: %w", err)
+		return 0, fmt.Errorf("unable to read metadata: %w", err)
 	}
+	return data.CurrentVersion, err
+}
 
-	token, err := vaultToken()
-	if err != nil {
-		return nil, err
-	}
-
-	vaultClient.SetToken(token)
-
-	data, err := vaultClient.Logical().Read(path)
+func fetchEnvironment(mount, path string) (map[string]interface{}, error) {
+	data, err := vaultClient.KVv2(mount).Get(context.Background(), path)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read secret: %w", err)
 	}
-	return data.Data["data"].(map[string]interface{}), err
-}
-
-func vaultToken() (string, error) {
-	home := os.Getenv("HOME")
-	content, err := ioutil.ReadFile(fmt.Sprintf("%s/.vault-token", home))
-	if err != nil {
-		return "", fmt.Errorf("unable to get vault token, are you signed in?")
-	}
-	return string(content), nil
+	return data.Data, err
 }
 
 func hashFilename(s string) string {
@@ -119,4 +116,28 @@ func createRamDisk() error {
 		return err
 	}
 	return err
+}
+
+func getVaultClient() *vault.Client {
+	vaultClient, err := vault.NewClient(vault.DefaultConfig())
+	if err != nil {
+		log.Fatalf("unable to initialize Vault client: %w", err)
+	}
+
+	token, err := vaultToken()
+	if err != nil {
+		log.Fatalf("unable to initialize Vault client: %w", err)
+	}
+
+	vaultClient.SetToken(token)
+	return vaultClient
+}
+
+func vaultToken() (string, error) {
+	home := os.Getenv("HOME")
+	content, err := ioutil.ReadFile(fmt.Sprintf("%s/.vault-token", home))
+	if err != nil {
+		return "", fmt.Errorf("unable to get vault token, are you signed in?")
+	}
+	return string(content), nil
 }
