@@ -106,27 +106,27 @@ func createRamDisk() error {
 	cmd := exec.Command("hdiutil", "attach", "-nomount", "ram://40960") // desired size in MiB * 2048
 	out, err := cmd.Output()
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to create ramdisk: %w", err)
 	}
 	devicePath := string(bytes.TrimSpace(out))
 
-	cmd = exec.Command("diskutil", "partitionDisk", devicePath, "1", "GPTFormat", "APFS", "vaultenv", "'100%'")
+	cmd = exec.Command("diskutil", "partitionDisk", devicePath, "1", "GPTFormat", "APFS", "vaultenv", "100%")
 	out, err = cmd.Output()
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to format ramdisk: %w", err)
 	}
-	return err
+	return nil
 }
 
 func getVaultClient() *vault.Client {
 	vaultClient, err := vault.NewClient(vault.DefaultConfig())
 	if err != nil {
-		log.Fatalf("unable to initialize Vault client: %w", err)
+		log.Fatal(fmt.Errorf("unable to initialize Vault client: %w", err))
 	}
 
 	token, err := vaultToken()
 	if err != nil {
-		log.Fatalf("unable to initialize Vault client: %w", err)
+		log.Fatal(fmt.Errorf("unable to initialize Vault client: %w", err))
 	}
 
 	vaultClient.SetToken(token)
