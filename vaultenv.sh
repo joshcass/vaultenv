@@ -4,6 +4,6 @@ vaultenv() {
     local path
     local file
     path=$1
-    file=$(vaultenv "$path")
+    file=$(venv "$path")
     dotenv "$file"
 }
