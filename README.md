@@ -33,3 +33,5 @@ Rename or alias the binary as `venv`
 Make sure it is executable
 
 Download the `vaultenv.sh` script and move it to `$HOME/.config/direnv/lib`
+
+[1]: https://direnv.net
